@@ -1,0 +1,149 @@
+#!/bin/bash -bm
+#
+# ISOMounter
+#
+# Run an gui application while mounting/unmounting ISO images
+#
+#                                                 JL 20121005
+#
+#
+# Usage:
+#
+#     isomounter /path/to/application /path/to/isos
+#
+#     Application path is mandatory
+#     ISO path is optional, defaults to ./iso if not given
+#
+# https://github.com/johnlane/isomounter
+#
+# Copyright (c) 2012 John Lane
+# 
+# MIT License
+# 
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
+# 
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+# LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+# WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# 
+# http://www.opensource.org/licenses/mit-license.php
+# 
+
+# Mount point where ISO will be mounted
+mnt_point=/mnt
+
+function abort {
+   echo "$1. Cannot continue."
+   exit 1
+}
+
+function unmount {
+    [[ ! -z $1 ]] && if grep -q "$mnt_point" /proc/mounts 2>/dev/null; then
+        sudo umount $1
+    fi
+}
+
+# Only continue if the mount point is free
+if grep -q "$mnt_point" /proc/mounts 2>/dev/null; then
+    echo something is already mounted on "$mnt_point"
+    exit
+fi
+
+# Our path
+rundir=$(dirname "$0")
+
+# program to start
+prog="${rundir}/${1}"
+[[ -f ${prog} && -x ${prog} ]] || abort "Sorry: ${prog} is not an executable"
+
+# Get list of ISOs (argument $2 or ./iso)
+isodir=${2:-${rundir}/iso}
+isos=()
+for iso in $(ls ${isodir}); do
+    # mount recognised images only
+    file $isodir/$iso | grep "ISO 9660 CD-ROM filesystem data" > /dev/null
+    [[ $? == 0 ]] && isos+=($iso)
+done
+
+function display_iso_menu {
+    
+    # menu selection
+    g_menu_choice=""
+
+    function get_menu_choice {
+        stty raw                 # set the tty driver to raw mode 
+        stty -echo               # don't echo keypresses to screen
+        max=$1                   # maximum valid choice
+        choice=$(expr $max + 1) # invalid choice
+        while [[ $choice -gt $max || -z $choice ]]; do
+            choice=`dd iflag=nonblock if=/dev/tty bs=1 count=1 2>/dev/null`
+        done
+        g_menu_choice=$choice
+        stty sane                # restore tty
+        stty echo                # restore echo
+    }
+    
+    #
+    # display menu and get choice
+    #
+    echo -e "\nAvailable ISOs:\n"
+    for i in $(seq 1 ${#isos[@]}); do
+        echo -e "$i\t${isos[i-1]}"
+    done
+    echo -e -n "\n\nWhich will it be? "
+    
+    # read the menu selection
+    get_menu_choice ${#isos[@]}
+    
+    # print the results.
+    echo -e "\nYou chose $g_menu_choice"
+    
+    # Unmount current iso, if any
+    unmount ${mounted_iso}
+    
+    # Mount chosen iso
+    iso=${isodir}/${isos[$g_menu_choice-1]}
+    echo loop mounting the iso image "${iso}"...
+    sudo mount -o loop "$iso" "$mnt_point"
+    mounted_iso=${mnt_point}
+
+}
+
+#
+# Launch Programme
+#
+{
+    "${prog}" > /dev/null 2>&1
+    kill -USR1 $$
+} &
+
+echo "Started '${prog}'."
+
+function cleanup {
+    unmount ${mounted_iso}
+    stty sane                # restore tty
+    stty echo                # restore echo
+    echo -e "\n'${prog}' has exited. Goodbye"
+    exit
+}
+
+trap cleanup SIGUSR1
+
+while true ; do
+
+    display_iso_menu
+
+done
