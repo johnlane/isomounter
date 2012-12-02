@@ -78,6 +78,12 @@ for iso in $(ls ${isodir}); do
     [[ $? == 0 ]] && isos+=($iso)
 done
 
+# Add optical drives
+for i in $(ls -l /dev | grep "11," | awk '{print "/dev/"$NF}')
+do
+    isos+=($i)
+done
+
 function display_iso_menu {
     
     # menu selection
@@ -100,6 +106,7 @@ function display_iso_menu {
     # display menu and get choice
     #
     echo -e "\nAvailable ISOs:\n"
+    [[ -n ${mounted_iso} ]] && echo -e "0\tunmount"
     for i in $(seq 1 ${#isos[@]}); do
         echo -e "$i\t${isos[i-1]}"
     done
@@ -112,13 +119,23 @@ function display_iso_menu {
     echo -e "\nYou chose $g_menu_choice"
     
     # Unmount current iso, if any
-    unmount ${mounted_iso}
-    
+    unmount ${mounted_iso} && unset mounted_iso
+
     # Mount chosen iso
-    iso=${isodir}/${isos[$g_menu_choice-1]}
-    echo loop mounting the iso image "${iso}"...
-    sudo mount -o loop "$iso" "$mnt_point"
-    mounted_iso=${mnt_point}
+    if [[ ${g_menu_choice} > 0 ]]; then
+        
+        iso=${isodir}/${isos[$g_menu_choice-1]}
+        if [[ -f $iso ]]; then
+            mntopts="-o loop"
+            echo loop mounting the iso image "${iso}"...
+        else
+            iso=${isos[$g_menu_choice-1]}
+            mntopts=""
+        fi 
+        sudo mount ${mntopts} "$iso" "$mnt_point"
+        mounted_iso=${mnt_point}
+    
+    fi
 
 }
 
